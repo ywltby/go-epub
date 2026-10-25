@@ -210,7 +210,13 @@ func (p *pkg) setModified(timestamp string) {
 		Property: pkgModifiedProperty,
 	}
 
-	p.xml.Metadata.Meta = updateMeta(p.xml.Metadata.Meta, p.modifiedMeta)
+	meta := p.xml.Metadata.Meta[:0]
+	for _, item := range p.xml.Metadata.Meta {
+		if item.Property != pkgModifiedProperty {
+			meta = append(meta, item)
+		}
+	}
+	p.xml.Metadata.Meta = append(meta, *p.modifiedMeta)
 }
 
 func (p *pkg) setTitle(title string) {

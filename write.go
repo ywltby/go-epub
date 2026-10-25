@@ -2,6 +2,7 @@ package epub
 
 import (
 	"archive/zip"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -21,6 +22,8 @@ type UnableToCreateEpubError struct {
 func (e *UnableToCreateEpubError) Error() string {
 	return fmt.Sprintf("Error creating EPUB at %q: %+v", e.Path, e.Err)
 }
+
+func (e *UnableToCreateEpubError) Unwrap() error { return e.Err }
 
 const (
 	containerFilename     = "container.xml"
@@ -55,6 +58,11 @@ const (
 func (e *Epub) WriteTo(dst io.Writer) (int64, error) {
 	e.Lock()
 	defer e.Unlock()
+	// These collections are derived from the current sections on every attempt.
+	e.pkg.xml.ManifestItems = nil
+	e.pkg.xml.Spine.Items = nil
+	e.toc.navXML.Links = nil
+	e.toc.ncxXML.NavMap = nil
 	tempDir := uuid.Must(uuid.NewV4()).String()
 
 	err := filesystem.Mkdir(tempDir, dirPermissions)
@@ -64,7 +72,7 @@ func (e *Epub) WriteTo(dst io.Writer) (int64, error) {
 	}
 	defer func() {
 		if err := filesystem.RemoveAll(tempDir); err != nil {
-			log.Print("Error removing temp directory: %w", err)
+			log.Printf("Error removing temp directory: %v", err)
 		}
 	}()
 	err = writeMimetype(tempDir)
@@ -120,12 +128,16 @@ func (e *Epub) WriteTo(dst io.Writer) (int64, error) {
 
 	// Must be called after:
 	// createEpubFolders()
-	e.writeSections(tempDir)
+	if err := e.writeSections(tempDir); err != nil {
+		return 0, err
+	}
 
 	// Must be called after:
 	// createEpubFolders()
 	// writeSections()
-	e.writeToc(tempDir)
+	if err := e.writeToc(tempDir); err != nil {
+		return 0, err
+	}
 
 	// Must be called after:
 	// createEpubFolders()
@@ -135,7 +147,9 @@ func (e *Epub) WriteTo(dst io.Writer) (int64, error) {
 	// writeAudios()
 	// writeSections()
 	// writeToc()
-	e.writePackageFile(tempDir)
+	if err := e.writePackageFile(tempDir); err != nil {
+		return 0, err
+	}
 	// Must be called last
 	return e.writeEpub(tempDir, dst)
 }
@@ -143,7 +157,7 @@ func (e *Epub) WriteTo(dst io.Writer) (int64, error) {
 // Write writes the EPUB file. The destination path must be the full path to
 // the resulting file, including filename and extension.
 // The result is always writen to the local filesystem even if the underlying storage is in memory.
-func (e *Epub) Write(destFilePath string) error {
+func (e *Epub) Write(destFilePath string) (err error) {
 
 	f, err := os.Create(destFilePath)
 	if err != nil {
@@ -152,7 +166,7 @@ func (e *Epub) Write(destFilePath string) error {
 			Err:  err,
 		}
 	}
-	defer f.Close()
+	defer func() { err = errors.Join(err, f.Close()) }()
 	_, err = e.WriteTo(f)
 	return err
 }
@@ -228,29 +242,31 @@ func (e *Epub) writeCSSFiles(rootEpubDir string) error {
 
 // writeCounter counts the number of bytes written to it.
 type writeCounter struct {
+	io.Writer
 	Total int64 // Total # of bytes written
 }
 
 // Write implements the io.Writer interface.
-// Always completes and never returns an error.
 func (wc *writeCounter) Write(p []byte) (int, error) {
-	n := len(p)
+	n, err := wc.Writer.Write(p)
 	wc.Total += int64(n)
-	return n, nil
+	return n, err
 }
 
 // Write the EPUB file itself by zipping up everything from a temp directory
 // The return value is the number of bytes written. Any error encountered during the write is also returned.
-func (e *Epub) writeEpub(rootEpubDir string, dst io.Writer) (int64, error) {
-	counter := &writeCounter{}
-	teeWriter := io.MultiWriter(counter, dst)
-
-	z := zip.NewWriter(teeWriter)
+func (e *Epub) writeEpub(rootEpubDir string, dst io.Writer) (n int64, err error) {
+	counter := &writeCounter{Writer: dst}
+	z := zip.NewWriter(counter)
+	defer func() {
+		err = errors.Join(err, z.Close())
+		n = counter.Total
+	}()
 
 	skipMimetypeFile := false
 
 	// addFileToZip adds the file present at path to the zip archive. The path is relative to the rootEpubDir
-	addFileToZip := func(path string, d fs.DirEntry, err error) error {
+	addFileToZip := func(path string, d fs.DirEntry, err error) (result error) {
 		if err != nil {
 			return err
 		}
@@ -294,15 +310,9 @@ func (e *Epub) writeEpub(rootEpubDir string, dst io.Writer) (int64, error) {
 		if err != nil {
 			return fmt.Errorf("error opening file %v being added to EPUB: %w", path, err)
 		}
-		defer func() {
-			if err := r.Close(); err != nil {
-				log.Println(err)
-			}
-		}()
-
-		_, err = io.Copy(w, r)
-		if err != nil {
-			return fmt.Errorf("error copying contents of file being added EPUB: %w", err)
+		defer func() { result = errors.Join(result, r.Close()) }()
+		if _, err := io.Copy(w, r); err != nil {
+			return fmt.Errorf("error reading file being added to EPUB: %w", err)
 		}
 		return nil
 	}
@@ -311,16 +321,10 @@ func (e *Epub) writeEpub(rootEpubDir string, dst io.Writer) (int64, error) {
 	mimetypeFilePath := filepath.Join(rootEpubDir, mimetypeFilename)
 	mimetypeInfo, err := fs.Stat(filesystem, mimetypeFilePath)
 	if err != nil {
-		if err := z.Close(); err != nil {
-			log.Println(err)
-		}
 		return counter.Total, fmt.Errorf("unable to get FileInfo for mimetype file: %w", err)
 	}
 	err = addFileToZip(mimetypeFilePath, fileInfoToDirEntry(mimetypeInfo), nil)
 	if err != nil {
-		if err := z.Close(); err != nil {
-			log.Println(err)
-		}
 		return counter.Total, fmt.Errorf("unable to add mimetype file to EPUB: %w", err)
 	}
 
@@ -328,14 +332,10 @@ func (e *Epub) writeEpub(rootEpubDir string, dst io.Writer) (int64, error) {
 
 	err = fs.WalkDir(filesystem, rootEpubDir, addFileToZip)
 	if err != nil {
-		if err := z.Close(); err != nil {
-			log.Println(err)
-		}
 		return counter.Total, fmt.Errorf("unable to add file to EPUB: %w", err)
 	}
 
-	err = z.Close()
-	return counter.Total, err
+	return counter.Total, nil
 }
 
 // Get fonts from their source and save them in the temporary directory
@@ -413,16 +413,13 @@ func writeMimetype(rootEpubDir string) error {
 	return nil
 }
 
-func (e *Epub) writePackageFile(rootEpubDir string) {
-	err := e.pkg.write(rootEpubDir)
-	if err != nil {
-		log.Println(err)
-	}
+func (e *Epub) writePackageFile(rootEpubDir string) error {
+	return e.pkg.write(rootEpubDir)
 }
 
 // Write the section files to the temporary directory and add the sections to
 // the TOC and package files
-func (e *Epub) writeSections(rootEpubDir string) {
+func (e *Epub) writeSections(rootEpubDir string) error {
 	filenamelist := getFilenames(e.sections)
 	parentlist := getParents(e.sections, "-1")
 	if len(e.sections) > 0 {
@@ -431,24 +428,18 @@ func (e *Epub) writeSections(rootEpubDir string) {
 		if e.cover.xhtmlFilename != "" {
 			e.pkg.addToSpine(e.cover.xhtmlFilename)
 		}
-		err := writeSections(rootEpubDir, e, e.sections, parentlist, filenamelist)
-		if err != nil {
-			log.Println(err)
-		}
+		return writeSections(rootEpubDir, e, e.sections, parentlist, filenamelist)
 	}
+	return nil
 }
 
 // Write the TOC file to the temporary directory and add the TOC entries to the
 // package file
-func (e *Epub) writeToc(rootEpubDir string) {
+func (e *Epub) writeToc(rootEpubDir string) error {
 	e.pkg.addToManifest(tocNavItemID, tocNavFilename, mediaTypeXhtml, tocNavItemProperties)
 	e.pkg.addToManifest(tocNcxItemID, tocNcxFilename, mediaTypeNcx, "")
 
-	err := e.toc.write(rootEpubDir)
-	if err != nil {
-		log.Println(err)
-	}
-
+	return e.toc.write(rootEpubDir)
 }
 
 // Create a list of sections and their parents.
@@ -478,7 +469,7 @@ func writeSections(rootEpubDir string, e *Epub, sections []*epubSection, parentf
 		sectionFilePath := filepath.Join(rootEpubDir, contentFolderName, xhtmlFolderName, section.filename)
 		err := section.xhtml.write(sectionFilePath)
 		if err != nil {
-			log.Println(err)
+			return err
 		}
 
 		relativePath := filepath.Join(xhtmlFolderName, section.filename)
@@ -488,17 +479,21 @@ func writeSections(rootEpubDir string, e *Epub, sections []*epubSection, parentf
 		e.pkg.addToManifest(section.filename, relativePath, mediaTypeXhtml, "")
 		if parentfilename[section.filename] == "-1" && section.filename != e.cover.xhtmlFilename {
 			j := filenamelist[section.filename]
-			e.toc.addSubSection("-1", j, section.xhtml.Title(), relativePath)
+			if err := e.toc.addSubSection("-1", j, section.xhtml.Title(), relativePath); err != nil {
+				return err
+			}
 		}
 		if parentfilename[section.filename] != "-1" && section.filename != e.cover.xhtmlFilename {
 			j := filenamelist[section.filename]
 			parentfilenameis := parentfilename[section.filename]
-			e.toc.addSubSection(parentfilenameis, j, section.xhtml.Title(), relativePath)
+			if err := e.toc.addSubSection(parentfilenameis, j, section.xhtml.Title(), relativePath); err != nil {
+				return err
+			}
 		}
 		if section.children != nil {
 			err = writeSections(rootEpubDir, e, section.children, parentfilename, filenamelist)
 			if err != nil {
-				log.Println(err)
+				return err
 			}
 		}
 	}
