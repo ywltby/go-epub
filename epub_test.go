@@ -889,12 +889,12 @@ func TestManifestItems(t *testing.T) {
 
 	testImageFromURLSource := server.URL + "/gophercolor16x16.png"
 	testManifestItems := []string{
-		`id="id18a490af-f1fc-5ee4-a449-5c80f646a659" href="images/image0003.png" media-type="image/png"></item>`,
-		`id="id5857b58e-9d4f-5b23-ad10-d2644bb66023" href="images/filename with space.png" media-type="image/png"></item>`,
-		`id="id72c19376-e8fb-584c-9dbe-abc447874747" href="images/testfromfile.png" media-type="image/png"></item>`,
-		`id="ide10ba9f7-2ca1-5db1-8b0c-cbdf809c8372" href="images/image0006.png" media-type="image/png"></item>`,
-		`id="ide5dc5e63-8586-5ff2-94d9-037b0543ac24" href="images/gophercolor16x16.png" media-type="image/png"></item>`,
-		`id="idfbc147f0-b6fd-5f0f-9d96-69f1c80e2ec6" href="images/01filenametest.png" media-type="image/png"></item>`,
+		`id="id2b117bd3-c9b3-517d-a035-e768e64be81e" href="images/filename with space.png" media-type="image/png"></item>`,
+		`id="id824e0c01-9d37-5662-a86d-6435764224f3" href="images/image0006.png" media-type="image/png"></item>`,
+		`id="idb96a7087-f298-560a-87c7-3e8d33d07cae" href="images/testfromfile.png" media-type="image/png"></item>`,
+		`id="idcb0fae37-df32-565f-88b2-7b72660e0b08" href="images/image0003.png" media-type="image/png"></item>`,
+		`id="idf10831d7-c162-5f2e-8eca-cd6a96936bd0" href="images/gophercolor16x16.png" media-type="image/png"></item>`,
+		`id="idf4eb4ea8-9ac5-58c1-abed-f7f123224bfb" href="images/01filenametest.png" media-type="image/png"></item>`,
 		`id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"></item>`,
 	}
 
