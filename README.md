@@ -1,6 +1,6 @@
 # Shutongwen maintenance fork
 
-Based on upstream go-shiori/go-epub v1.2.1 (`2f668451ef95fd27bce83491cd85a41f4a4dcf5e`).
+Forked from go-shiori/go-epub v1.2.1 (`2f668451ef95fd27bce83491cd85a41f4a4dcf5e`); `main` also tracks later upstream commits through `822e45c`.
 
 - R17: maintain the section filename index in linear space and time.
 - R19: propagate write and close errors through every layer.
@@ -8,16 +8,15 @@ Based on upstream go-shiori/go-epub v1.2.1 (`2f668451ef95fd27bce83491cd85a41f4a4
 
 Module: `github.com/ywltby/go-epub`. Fork prerelease: `v1.2.2-stw.1` (newer than v1.2.1; the suffix identifies the fork).
 
-[![CI](https://github.com/go-shiori/go-epub/workflows/CI/badge.svg)](https://github.com/go-shiori/go-epub/actions)
-[![Coverage Status](https://coveralls.io/repos/github/go-shiori/go-epub/badge.svg)](https://coveralls.io/github/go-shiori/go-epub)
-[![Go Report Card](https://goreportcard.com/badge/github.com/go-shiori/go-epub)](https://goreportcard.com/report/github.com/go-shiori/go-epub)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/go-shiori/go-epub/blob/master/LICENSE)
-[![GoDoc](https://godoc.org/github.com/go-shiori/go-epub?status.svg)](https://godoc.org/github.com/go-shiori/go-epub)
+[![CI](https://github.com/ywltby/go-epub/actions/workflows/ci.yml/badge.svg)](https://github.com/ywltby/go-epub/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ywltby/go-epub)](https://goreportcard.com/report/github.com/ywltby/go-epub)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/ywltby/go-epub/blob/main/LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ywltby/go-epub.svg)](https://pkg.go.dev/github.com/ywltby/go-epub)
 
 ---
 
 ### Features
-- [Documented API](https://godoc.org/github.com/go-shiori/go-epub)
+- [Documented API](https://pkg.go.dev/github.com/ywltby/go-epub)
 - Creates valid EPUB 3.0 files
 - Adds an additional EPUB 2.0 table of contents for maximum compatibility
 - Includes support for adding CSS, images, and fonts
