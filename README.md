@@ -6,7 +6,7 @@ Forked from go-shiori/go-epub v1.2.1 (`2f668451ef95fd27bce83491cd85a41f4a4dcf5e`
 - R19: propagate write and close errors through every layer.
 - MIT copyright remains with the original authors. LICENSE, NOTICE, and the sample licensing notices are preserved.
 
-Module: `github.com/ywltby/go-epub`. Fork prerelease: `v1.2.2-stw.1` (newer than v1.2.1; the suffix identifies the fork).
+Module: `github.com/ywltby/go-epub`. Releases use plain semantic versions from `v1.3.0`; the earlier `v1.2.2-stw.1` and `v1.2.3-stw.1` prerelease tags stay for existing builds.
 
 [![CI](https://github.com/ywltby/go-epub/actions/workflows/ci.yml/badge.svg)](https://github.com/ywltby/go-epub/actions)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ywltby/go-epub)](https://goreportcard.com/report/github.com/ywltby/go-epub)
