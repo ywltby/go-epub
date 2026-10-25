@@ -33,7 +33,6 @@ func detectMediaType(mediaSource string) string {
 }
 
 func (g grabber) checkMedia(mediaSource string) error {
-	var fetchErrors []error // Declare fetchErrors variable
 	var f func(string, bool) (io.ReadCloser, error)
 	switch detectMediaType(mediaSource) {
 	case "URL":
@@ -44,16 +43,13 @@ func (g grabber) checkMedia(mediaSource string) error {
 		f = g.localHandler
 	}
 	source, err := f(mediaSource, true)
-	if err != nil {
-		fetchErrors = append(fetchErrors, err) // Capture the error
-	}
 	if source != nil {
-		source.Close()
+		err = errors.Join(err, source.Close())
 	}
 	if err == nil {
 		return nil
 	}
-	return &FileRetrievalError{Source: mediaSource, Err: fetchError(fetchErrors)}
+	return &FileRetrievalError{Source: mediaSource, Err: err}
 }
 
 // fetchMedia from mediaSource into mediaFolderPath as mediaFilename returning its type.
@@ -67,9 +63,14 @@ func (g grabber) fetchMedia(mediaSource, mediaFolderPath, mediaFilename string) 
 	// failfast, create the output file handler at the begining, if we cannot write the file, bail out
 	w, err := filesystem.Create(mediaFilePath)
 	if err != nil {
-		return "", fmt.Errorf("unable to create file %s: %s", mediaFilePath, err)
+		return "", fmt.Errorf("unable to create file %s: %w", mediaFilePath, err)
 	}
-	defer w.Close()
+	writerClosed := false
+	defer func() {
+		if !writerClosed {
+			err = errors.Join(err, w.Close())
+		}
+	}()
 	var source io.ReadCloser
 	fetchErrors := make([]error, 0)
 	for _, f := range []func(string, bool) (io.ReadCloser, error){
@@ -89,7 +90,7 @@ func (g grabber) fetchMedia(mediaSource, mediaFolderPath, mediaFilename string) 
 		return "", &FileRetrievalError{Source: mediaSource, Err: fetchError(fetchErrors)}
 
 	}
-	defer source.Close()
+	defer func() { err = errors.Join(err, source.Close()) }()
 
 	_, err = io.Copy(w, source)
 	if err != nil {
@@ -97,13 +98,18 @@ func (g grabber) fetchMedia(mediaSource, mediaFolderPath, mediaFilename string) 
 		// might have an issue
 		return "", &FileRetrievalError{Source: mediaSource, Err: err}
 	}
+	// Finalize the staged file before reopening it for MIME detection.
+	writerClosed = true
+	if err := w.Close(); err != nil {
+		return "", fmt.Errorf("unable to close media file: %w", err)
+	}
 
 	// Detect the mediaType
 	r, err := filesystem.Open(mediaFilePath)
 	if err != nil {
 		return "", err
 	}
-	defer r.Close()
+	defer func() { err = errors.Join(err, r.Close()) }()
 	mime, err := mimetype.DetectReader(r)
 	if err != nil {
 		return "", fmt.Errorf("unable to detect media type: %w", err)
@@ -131,7 +137,7 @@ func (g grabber) httpHandler(mediaSource string, onlyCheck bool) (io.ReadCloser,
 		return nil, err
 	}
 	if resp.StatusCode > 400 {
-		return nil, errors.New("cannot get file, bad return code")
+		return nil, errors.Join(errors.New("cannot get file, bad return code"), resp.Body.Close())
 	}
 	return resp.Body, nil
 }
@@ -159,6 +165,8 @@ func (g grabber) dataURLHandler(mediaSource string, onlyCheck bool) (io.ReadClos
 }
 
 type fetchError []error
+
+func (f fetchError) Unwrap() []error { return []error(f) }
 
 func (f fetchError) Error() string {
 	var message string

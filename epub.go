@@ -41,6 +41,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -68,6 +69,8 @@ type FileRetrievalError struct {
 func (e *FileRetrievalError) Error() string {
 	return fmt.Sprintf("Error retrieving %q from source: %+v", e.Source, e.Err)
 }
+
+func (e *FileRetrievalError) Unwrap() error { return e.Err }
 
 // ParentDoesNotExistError is thrown by AddSubSection if the parent with the
 // previously defined internal filename does not exist.
@@ -141,9 +144,11 @@ type Epub struct {
 	// Page progression direction
 	ppd string
 	// The package file (package.opf)
-	pkg      *pkg
-	sections []*epubSection
-	title    string
+	pkg               *pkg
+	sections          []*epubSection
+	sectionByFilename map[string]*epubSection
+	nextSectionIndex  int
+	title             string
 	// Table of contents
 	toc *toc
 }
@@ -177,6 +182,8 @@ func NewEpub(title string) (*Epub, error) {
 	e.images = make(map[string]string)
 	e.videos = make(map[string]string)
 	e.audios = make(map[string]string)
+	e.sectionByFilename = make(map[string]*epubSection)
+	e.nextSectionIndex = 1
 	e.pkg, err = newPackage()
 	if err != nil {
 		return nil, fmt.Errorf("can't create NewEpub: %w", err)
@@ -336,22 +343,21 @@ func (e *Epub) AddSubSection(parentFilename string, body string, sectionTitle st
 
 func (e *Epub) addSection(parentFilename string, body string, sectionTitle string, internalFilename string, internalCSSPath string) (string, error) {
 
-	// get list of all xhtml filename inside of epub
-	filenamelist := getFilenames(e.sections)
-	parentIndex := filenamelist[parentFilename] - 1
-
-	if parentFilename != "" && parentIndex == -1 {
+	parent := e.sectionByFilename[parentFilename]
+	if parentFilename != "" && parent == nil {
 		return "", &ParentDoesNotExistError{Filename: parentFilename}
 	}
 
 	// Generate a filename if one isn't provided
-	if internalFilename == "" {
-		index := 1
-		for internalFilename == "" {
+	automatic := internalFilename == ""
+	index := e.nextSectionIndex
+	if automatic {
+		for {
 			internalFilename = fmt.Sprintf(sectionFileFormat, index)
-			if keyExists(filenamelist, internalFilename) {
-				internalFilename, index = "", index+1
+			if e.sectionByFilename[internalFilename] == nil {
+				break
 			}
+			index++
 		}
 	} else {
 		// if internalFilename is not empty, check that it has .xhtml at the end.
@@ -360,7 +366,7 @@ func (e *Epub) addSection(parentFilename string, body string, sectionTitle strin
 		if filepath.Ext(internalFilename) != ".xhtml" {
 			internalFilename += ".xhtml"
 		}
-		if keyExists(filenamelist, internalFilename) {
+		if e.sectionByFilename[internalFilename] != nil {
 			return "", &FilenameAlreadyUsedError{Filename: internalFilename}
 		}
 	}
@@ -382,16 +388,14 @@ func (e *Epub) addSection(parentFilename string, body string, sectionTitle strin
 		children: nil,
 	}
 
-	// section have parentIndex -1 and subsection have parrentindex != -1
-	if parentIndex == -1 {
-		// if it is section append to the root
+	if parent == nil {
 		e.sections = append(e.sections, s)
 	} else {
-		// find parent section and append subsection to that
-		err := sectionAppender(e.sections, parentFilename, s)
-		if err != nil {
-			return "", err
-		}
+		parent.children = append(parent.children, s)
+	}
+	e.sectionByFilename[internalFilename] = s
+	if automatic {
+		e.nextSectionIndex = index + 1
 	}
 
 	return internalFilename, nil
@@ -447,6 +451,7 @@ func (e *Epub) SetCover(internalImagePath string, internalCSSPath string) error 
 		// Remove the xhtml file
 		for i, section := range e.sections {
 			if section.filename == e.cover.xhtmlFilename {
+				e.forgetSection(section)
 				e.sections = append(e.sections[:i], e.sections[i+1:]...)
 				break
 			}
@@ -508,6 +513,17 @@ func (e *Epub) SetCover(internalImagePath string, internalCSSPath string) error 
 	}
 	e.cover.xhtmlFilename = filepath.Base(coverPath)
 	return nil
+}
+
+func (e *Epub) forgetSection(section *epubSection) {
+	delete(e.sectionByFilename, section.filename)
+	index, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(section.filename, "section"), ".xhtml"))
+	if err == nil && index > 0 && index < e.nextSectionIndex && fmt.Sprintf(sectionFileFormat, index) == section.filename {
+		e.nextSectionIndex = index
+	}
+	for _, child := range section.children {
+		e.forgetSection(child)
+	}
 }
 
 // SetIdentifier sets the unique identifier of the EPUB, such as a UUID, DOI,
@@ -677,20 +693,15 @@ func addMedia(client *http.Client, source string, internalFilename string, media
 func getFilenames(sections []*epubSection) map[string]int {
 	filenames := make(map[string]int)
 	index := 1
-
-	for _, section := range sections {
-		filenames[section.filename] = index
-		index++
-
-		if section.children != nil {
-			childFilenames := getFilenames(section.children)
-			for filename := range childFilenames {
-				filenames[filename] = index
-				index++
-			}
+	var visit func([]*epubSection)
+	visit = func(sections []*epubSection) {
+		for _, section := range sections {
+			filenames[section.filename] = index
+			index++
+			visit(section.children)
 		}
 	}
-
+	visit(sections)
 	return filenames
 }
 
