@@ -17,8 +17,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/go-shiori/go-epub/internal/storage"
-	"github.com/go-shiori/go-epub/internal/storage/osfs"
+	"github.com/ywltby/go-epub/internal/storage"
+	"github.com/ywltby/go-epub/internal/storage/osfs"
 )
 
 func TestReviewRepairR17SectionAllocationGrowth(t *testing.T) {
