@@ -314,6 +314,22 @@ func (e *Epub) AddSection(body string, sectionTitle string, internalFilename str
 	return e.addSection("", body, sectionTitle, internalFilename, internalCSSPath)
 }
 
+// AddSectionFile adds a section whose XHTML body is read from a local file during WriteTo.
+// The caller must keep the file unchanged until all writes have completed.
+func (e *Epub) AddSectionFile(path string, sectionTitle string, internalFilename string, internalCSSPath string) (string, error) {
+	e.Lock()
+	defer e.Unlock()
+	if path == "" {
+		return "", fmt.Errorf("section body path is empty")
+	}
+	name, err := e.addSection("", "", sectionTitle, internalFilename, internalCSSPath)
+	if err != nil {
+		return "", err
+	}
+	e.sectionByFilename[name].xhtml.bodyFile = path
+	return name, nil
+}
+
 // AddSubSection adds a nested section (chapter, etc) to an existing section.
 // The method returns a relative path to the section that can be used from another
 // section (for links).

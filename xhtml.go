@@ -1,8 +1,12 @@
 package epub
 
 import (
+	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 )
 
 const (
@@ -22,7 +26,8 @@ const (
 
 // xhtml implements an XHTML document
 type xhtml struct {
-	xml *xhtmlRoot
+	xml      *xhtmlRoot
+	bodyFile string
 }
 
 // This holds the actual XHTML content
@@ -118,6 +123,9 @@ func (x *xhtml) Title() string {
 
 // Write the XHTML file to the specified path
 func (x *xhtml) write(xhtmlFilePath string) error {
+	if x.bodyFile != "" {
+		return x.writeBodyFile(xhtmlFilePath)
+	}
 	xhtmlFileContent, err := xml.MarshalIndent(x.xml, "", "  ")
 	if err != nil {
 		return fmt.Errorf("Error marshalling XML for XHTML file: %w\n"+"\tXML=%v", err, x.xml)
@@ -132,6 +140,49 @@ func (x *xhtml) write(xhtmlFilePath string) error {
 
 	if err := filesystem.WriteFile(xhtmlFilePath, []byte(xhtmlFileContent), filePermissions); err != nil {
 		return fmt.Errorf("Error writing XHTML file: %w", err)
+	}
+	return nil
+}
+
+func (x *xhtml) writeBodyFile(path string) (err error) {
+	input, err := os.Open(x.bodyFile)
+	if err != nil {
+		return fmt.Errorf("open section body: %w", err)
+	}
+	defer func() { err = errors.Join(err, input.Close()) }()
+	const marker = "__epub_section_body_file_marker__"
+	old := x.xml.Body.XML
+	x.xml.Body.XML = "\n" + marker + "\n"
+	defer func() { x.xml.Body.XML = old }()
+	encoded, err := xml.MarshalIndent(x.xml, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal section metadata: %w", err)
+	}
+	pos := bytes.LastIndex(encoded, []byte(marker))
+	if pos < 0 {
+		return fmt.Errorf("section body marker missing")
+	}
+	if err := filesystem.WriteFile(path, nil, filePermissions); err != nil {
+		return fmt.Errorf("prepare section: %w", err)
+	}
+	out, err := filesystem.Create(path)
+	if err != nil {
+		return fmt.Errorf("create section: %w", err)
+	}
+	defer func() { err = errors.Join(err, out.Close()) }()
+	for _, prefix := range [][]byte{[]byte(xml.Header), []byte(xhtmlDoctype), encoded[:pos]} {
+		if _, err := out.Write(prefix); err != nil {
+			return fmt.Errorf("write section header: %w", err)
+		}
+	}
+	if _, err := io.Copy(out, input); err != nil {
+		return fmt.Errorf("write section body: %w", err)
+	}
+	if _, err := out.Write(encoded[pos+len(marker):]); err != nil {
+		return fmt.Errorf("write section tail: %w", err)
+	}
+	if _, err := out.Write([]byte("\n")); err != nil {
+		return fmt.Errorf("write section newline: %w", err)
 	}
 	return nil
 }
