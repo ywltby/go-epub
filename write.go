@@ -55,7 +55,7 @@ const (
 )
 
 // WriteTo the dest io.Writer. The return value is the number of bytes written. Any error encountered during the write is also returned.
-func (e *Epub) WriteTo(dst io.Writer) (int64, error) {
+func (e *Epub) WriteTo(dst io.Writer) (written int64, retErr error) {
 	e.Lock()
 	defer e.Unlock()
 	// These collections are derived from the current sections on every attempt.
@@ -64,6 +64,9 @@ func (e *Epub) WriteTo(dst io.Writer) (int64, error) {
 	e.toc.navXML.Links = nil
 	e.toc.ncxXML.NavMap = nil
 	tempDir := uuid.Must(uuid.NewV4()).String()
+	if e.tempRoot != "" {
+		tempDir = filepath.Join(e.tempRoot, tempDir)
+	}
 
 	err := filesystem.Mkdir(tempDir, dirPermissions)
 	if err != nil {
@@ -72,7 +75,11 @@ func (e *Epub) WriteTo(dst io.Writer) (int64, error) {
 	}
 	defer func() {
 		if err := filesystem.RemoveAll(tempDir); err != nil {
-			log.Printf("Error removing temp directory: %v", err)
+			if e.tempRoot != "" {
+				retErr = errors.Join(retErr, fmt.Errorf("remove temporary EPUB directory: %w", err))
+			} else {
+				log.Printf("Error removing temp directory: %v", err)
+			}
 		}
 	}()
 	err = writeMimetype(tempDir)

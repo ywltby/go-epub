@@ -148,6 +148,7 @@ type Epub struct {
 	sections          []*epubSection
 	sectionByFilename map[string]*epubSection
 	nextSectionIndex  int
+	tempRoot          string
 	title             string
 	// Table of contents
 	toc *toc
@@ -328,6 +329,20 @@ func (e *Epub) AddSectionFile(path string, sectionTitle string, internalFilename
 	}
 	e.sectionByFilename[name].xhtml.bodyFile = path
 	return name, nil
+}
+
+// SetTempRoot selects a relative directory under the current storage root for temporary EPUB files.
+// The caller creates and owns the directory; an empty value restores the default.
+func (e *Epub) SetTempRoot(root string) error {
+	e.Lock()
+	defer e.Unlock()
+	if root != "" && (strings.ContainsAny(root, "\\\x00") || strings.HasPrefix(root, "/") ||
+		filepath.IsAbs(root) || filepath.VolumeName(root) != "" || path.Clean(root) != root ||
+		root == "." || root == ".." || strings.HasPrefix(root, "../")) {
+		return fmt.Errorf("invalid temporary EPUB root")
+	}
+	e.tempRoot = root
+	return nil
 }
 
 // AddSubSection adds a nested section (chapter, etc) to an existing section.
